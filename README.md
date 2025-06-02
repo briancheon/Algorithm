@@ -4,6 +4,15 @@ This repository contains solutions to algorithm problems from various online jud
 
 ---
 
+## 🙋‍♂️ Self-Introduction
+
+Hi! 
+I'm **ngblock** on [Baekjoon Online Judge](https://www.acmicpc.net/user/ngblock) and 
+**brian1000** on [Codeforces](https://codeforces.com/profile/brian1000).  
+I created this repository to track my problem-solving journey and share reusable code snippets for common algorithms.
+
+---
+
 ## 🔧 Base Functions
 
 Reusable implementations of common algorithms are stored in the `base/` directory. These can be imported or copied into solution files when needed.
