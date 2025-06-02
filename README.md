@@ -6,7 +6,7 @@ This repository contains solutions to algorithm problems from various online jud
 
 ## 🙋‍♂️ Handles
 
-**Baekjoon Online Judge**: [ngblock](https://icpc.me/ngblock)  
+**Baekjoon**: [ngblock](https://icpc.me/ngblock)  
 **Codeforces**: [brian1000](https://codeforces.com/profile/brian1000)  
 
 ---
