@@ -6,8 +6,8 @@ This repository contains solutions to algorithm problems from various online jud
 
 ## 🙋‍♂️ Handles
 
-**Baekjoon**: [ngblock](https://icpc.me/ngblock)  
-**Codeforces**: [brian1000](https://codeforces.com/profile/brian1000)  
+**Baekjoon**: [ngblock](https://icpc.me/ngblock) (Diamond 5)  
+**Codeforces**: [brian1000](https://codeforces.com/profile/brian1000) (Newbie)  
 
 ---
 
