@@ -2,3 +2,4 @@
 **/test*.py
 **/test*.c
 **/test*.cpp
+.vscode
