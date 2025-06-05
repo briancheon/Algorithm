@@ -1,4 +1,7 @@
-# Implementation of a Seg Tree for sum query
+"""
+Implementation of a segment tree for sum query
+* Lazy propagation not implemented (for later) *
+"""
 class SegmentTree:
     def __init__(self, arr):
         self.arr = arr
