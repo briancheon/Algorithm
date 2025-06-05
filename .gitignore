@@ -3,3 +3,4 @@
 **/test*.c
 **/test*.cpp
 .vscode
+/baekjoon/c/execution
