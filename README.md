@@ -6,7 +6,7 @@ This repository contains solutions to algorithm problems from various online jud
 
 ## 🙋‍♂️ Handles
 
-[![Solved.ac Profile](http://mazassumnida.wtf/api/v2/generate_badge?boj=백준아이디)](https://solved.ac/ngblock/)  
+[![Solved.ac Profile](http://mazassumnida.wtf/api/v2/generate_badge?boj=ngblock)](https://solved.ac/ngblock/)  
 **Baekjoon**: [ngblock](https://icpc.me/ngblock) (Diamond 5)  
 **Codeforces**: [brian1000](https://codeforces.com/profile/brian1000) (Newbie)  
 
