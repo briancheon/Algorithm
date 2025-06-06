@@ -1,6 +1,4 @@
 .DS_Store
-**/test*.py
-**/test*.c
-**/test*.cpp
+**/test*.*
 .vscode
 /baekjoon/c/execution
