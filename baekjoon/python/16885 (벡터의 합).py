@@ -38,7 +38,8 @@ min_size = float('inf')
 min_idx, min_oper = None, None
 for i in range(1, N):
     for j in range(i - 1, -1, -1):
-        check = (vectors[i][1][0] + vectors[j][1][0] * [-1, 1][vectors[i][1][0] * vectors[j][1][0] < 0]) ** 2
+        sign = 1 if vectors[i][1][0] * vectors[j][1][0] < 0 else -1
+        check = (vectors[i][1][0] + vectors[j][1][0] * sign) ** 2
         if check > min_size:
             break
         
