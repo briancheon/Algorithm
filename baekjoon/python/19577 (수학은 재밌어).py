@@ -1,41 +1,36 @@
 import sys
 import random
 
-def miller_rabin(n, s=5):
-    if n == 2 or n == 3:
-        return True
-      
-    elif n % 2 == 0 or n == 1:
-        return False
+def miller_rabin(n, k=5):
+	if n <= 1:
+		return False
 
-    for _ in range(s):
-        a = random.randint(1, n - 1)
-        if test(a, n):
-            return False
-
-    return True
-
-def test(a, n):
-    t = 0
-    u = n - 1
-
-    while u % 2 == 0:
-        t += 1
-        u //= 2
-
-    preX = pow(a, u, n)
-    curX = 0
-
-    for i in range(t):
-        curX = (preX * preX) % n
-        if curX == 1 and preX != 1 and preX != n - 1:
-            return True
-        preX = curX
-    
-    if curX != 1:
-        return True
-
-    return False
+	if n <= 3:
+		return True
+		
+	if n % 2 == 0:
+		return False
+	
+	s, d = 0, n - 1
+	while d % 2 == 0:
+		d //= 2
+		s += 1
+		
+	for _ in range(k):
+		a = random.randrange(2, n - 1)
+		x = pow(a, d, n)
+		if x == 1 or x == n - 1:
+			continue
+		
+		for _ in range(s - 1):
+			x = pow(x, 2, n)
+			if x == n - 1:
+				break
+				
+		else:
+			return False
+			
+	return True
 
 def gcd(a, b):
     if a < b: 
@@ -47,32 +42,39 @@ def gcd(a, b):
     return a
 
 def rho(n):
-    if n == 1:
-        return 1
-    
-    if miller_rabin(n):
-        return n
-    
-    if n % 2 == 0:
-        return 2
-    
-    x = random.randrange(2, n)
-    c = random.randrange(1, n)
-    d = 1
-    y = x
-    while d == 1:
-        x = (x * x % n + c) % n
-        y = (y * y % n + c) % n
-        y = (y * y % n + c) % n
-        d = gcd(n, abs(x - y))
-        if d == n: 
-            return rho(n)
-        
-    if miller_rabin(d):
-        return d
-    
-    else:
-        return rho(d)
+	def f(x, c):
+		return (x * x % n + c) % n
+	
+	if n == 1:
+		return 1
+
+	if miller_rabin(n):
+		return n
+
+	if n % 2 == 0:
+		return 2
+
+	for p in [3, 5, 7, 11, 13, 17, 19, 23, 29, 31]:
+		if n % p == 0:
+			return p
+
+	x = random.randrange(2, n)
+	c = random.randrange(1, n)
+	y = x
+	d = 1
+
+	while d == 1:
+		x = f(x, c)
+		y = f(f(y, c), c)
+		
+		d = gcd(abs(x - y), n)
+		if d == n:
+			return rho(n)
+
+	if miller_rabin(d):
+		return d
+
+	return rho(d)
 
 def factorize(n):
     if n == 1:
@@ -108,6 +110,7 @@ if N == 1:
 
 else:
     factors = get_factors(N)
+
     for k in factors:
         if k * euler_phi(k) == N:
             print(k)
