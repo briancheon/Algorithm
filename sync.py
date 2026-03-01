@@ -4,11 +4,6 @@ import os
 import json
 import time
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
 
 # ─────────────────────────────────────────
 #  CONFIG — all read from GitHub Secrets
@@ -36,50 +31,59 @@ LANG_FOLDERS = {
 }
 
 # ─────────────────────────────────────────
-#  STEP 1: Log in with Selenium to get cookie
+#  STEP 1: Log in with requests to get session cookie
 # ─────────────────────────────────────────
-def get_session_cookie():
+def get_session():
     if not BOJ_ID or not BOJ_PASSWORD:
         print("❌ BOJ_ID or BOJ_PASSWORD environment variable not set")
         return None
 
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.binary_location = "/usr/bin/chromium-browser"
+    session = requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.acmicpc.net/login"
+    }
 
-    service = Service("/usr/bin/chromedriver")
-    driver  = webdriver.Chrome(service=service, options=options)
+    print("🔐 Logging in to Baekjoon...")
 
-    try:
-        print("🔐 Logging in to Baekjoon...")
-        driver.get("https://www.acmicpc.net/login")
+    # Step 1: Load the login page to get the csrf token
+    resp = session.get("https://www.acmicpc.net/login", headers=headers)
+    soup = BeautifulSoup(resp.text, "html.parser")
 
-        wait = WebDriverWait(driver, 10)
-        wait.until(EC.presence_of_element_located((By.ID, "login_user_id")))
-
-        driver.find_element(By.ID, "login_user_id").send_keys(BOJ_ID)
-        driver.find_element(By.ID, "login_password").send_keys(BOJ_PASSWORD)
-        driver.find_element(By.ID, "submit_button").click()
-
-        wait.until(EC.url_changes("https://www.acmicpc.net/login"))
-
-        cookie = driver.get_cookie("OnlineJudge")
-        if not cookie:
-            print("❌ Login failed — please check your BOJ_ID and BOJ_PASSWORD secrets")
-            return None
-
-        print("✅ Login successful")
-        return cookie["value"]
-
-    except Exception as e:
-        print(f"❌ Selenium error: {e}")
+    # Extract csrf token from the login form
+    csrf = soup.select_one("input[name=csrf_key]")
+    if not csrf:
+        print("  ⚠️  Could not find CSRF token on login page")
+        print(f"  Page status: {resp.status_code}")
         return None
 
-    finally:
-        driver.quit()
+    csrf_value = csrf["value"]
+    print(f"  Found CSRF token: {csrf_value[:10]}...")
+
+    # Step 2: Submit login form
+    login_data = {
+        "login_user_id": BOJ_ID,
+        "login_password": BOJ_PASSWORD,
+        "csrf_key": csrf_value,
+        "auto_login": "on"
+    }
+
+    resp = session.post(
+        "https://www.acmicpc.net/signin",
+        data=login_data,
+        headers=headers,
+        allow_redirects=True
+    )
+
+    # Step 3: Verify login succeeded by checking for the OnlineJudge cookie
+    if "OnlineJudge" not in session.cookies:
+        print("❌ Login failed — OnlineJudge cookie not found")
+        print(f"  Response URL: {resp.url}")
+        print(f"  Response status: {resp.status_code}")
+        return None
+
+    print("✅ Login successful")
+    return session
 
 # ─────────────────────────────────────────
 #  STEP 2: Fetch all solved problems from solved.ac
@@ -108,7 +112,8 @@ def get_all_solved():
 
         for item in items:
             problem_id   = item["problemId"]
-            problem_name = item.get("titleKo") or item.get("titleEn", f"Problem {item['problemId']}")
+            # Use Korean title, fall back to English, fall back to problem number
+            problem_name = item.get("titleKo") or item.get("titleEn", f"Problem {problem_id}")
             solved.append((problem_id, problem_name))
 
         if len(solved) >= data["count"]:
@@ -124,11 +129,9 @@ def get_all_solved():
 #  STEP 3: Fetch latest accepted submission from Baekjoon
 #  Returns (submission_id, code, lang)
 # ─────────────────────────────────────────
-def get_accepted_submission(problem_id, session_cookie):
-    session = requests.Session()
+def get_accepted_submission(problem_id, session):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cookie": f"OnlineJudge={session_cookie}"
     }
 
     # result_id=4 means "Accepted"
@@ -213,14 +216,14 @@ def save_state(state):
 #  MAIN
 # ─────────────────────────────────────────
 def run():
-    # 1. Login and get fresh cookie
-    session_cookie = get_session_cookie()
-    if not session_cookie:
+    # 1. Login and get session
+    session = get_session()
+    if not session:
         return
 
     # 2. Load state and find all solved problems
     state      = load_state()
-    all_solved = get_all_solved()  # list of (problem_id, problem_name)
+    all_solved = get_all_solved()
 
     new_problems      = [(pid, pname) for pid, pname in all_solved if str(pid) not in state]
     existing_problems = [(pid, pname) for pid, pname in all_solved if str(pid) in state]
@@ -231,7 +234,7 @@ def run():
     # 3. Commit new problems
     for problem_id, problem_name in new_problems:
         print(f"  Processing new problem {problem_id} ({problem_name})...")
-        submission_id, code, lang = get_accepted_submission(problem_id, session_cookie)
+        submission_id, code, lang = get_accepted_submission(problem_id, session)
 
         if not code:
             continue
@@ -244,7 +247,7 @@ def run():
     # 4. Check existing problems for newer submissions
     for problem_id, problem_name in existing_problems:
         print(f"  Checking problem {problem_id} ({problem_name}) for updates...")
-        submission_id, code, lang = get_accepted_submission(problem_id, session_cookie)
+        submission_id, code, lang = get_accepted_submission(problem_id, session)
 
         if not code:
             continue

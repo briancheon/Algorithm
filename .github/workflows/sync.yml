@@ -20,18 +20,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Chrome and dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
-          pip install requests beautifulsoup4 selenium
-
-      - name: Verify Chromium paths
-        run: |
-          which chromium-browser
-          which chromedriver
-          chromium-browser --version
-          chromedriver --version
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
 
       - name: Configure git
         run: |
