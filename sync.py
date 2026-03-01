@@ -1,9 +1,13 @@
-import requests
 import subprocess
 import os
 import json
 import time
+import requests
 from bs4 import BeautifulSoup
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # ─────────────────────────────────────────
 #  CONFIG — all read from GitHub Secrets
@@ -30,88 +34,64 @@ LANG_FOLDERS = {
     "py":  "baekjoon/python",
 }
 
-# Realistic browser headers to avoid 403
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-}
-
 # ─────────────────────────────────────────
-#  STEP 1: Log in with requests to get session
+#  STEP 1: Log in with undetected-chromedriver
+#  Returns a requests.Session with the login cookie
 # ─────────────────────────────────────────
 def get_session():
     if not BOJ_ID or not BOJ_PASSWORD:
         print("❌ BOJ_ID or BOJ_PASSWORD environment variable not set")
         return None
 
-    session = requests.Session()
-
     print("🔐 Logging in to Baekjoon...")
 
-    # Step 1: Load the login page to get CSRF token
-    resp = session.get("https://www.acmicpc.net/login", headers=HEADERS)
-    print(f"  Login page status: {resp.status_code}")
+    options = uc.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
 
-    if resp.status_code != 200:
-        print(f"❌ Could not load login page (status {resp.status_code})")
+    driver = uc.Chrome(options=options)
+
+    try:
+        driver.get("https://www.acmicpc.net/login")
+
+        wait = WebDriverWait(driver, 15)
+        wait.until(EC.presence_of_element_located((By.ID, "login_user_id")))
+
+        driver.find_element(By.ID, "login_user_id").send_keys(BOJ_ID)
+        driver.find_element(By.ID, "login_password").send_keys(BOJ_PASSWORD)
+        driver.find_element(By.ID, "submit_button").click()
+
+        # Wait until redirected away from login page
+        wait.until(EC.url_changes("https://www.acmicpc.net/login"))
+        time.sleep(2)
+
+        # Extract cookies from browser and move them into a requests.Session
+        browser_cookies = driver.get_cookies()
+        session = requests.Session()
+        for cookie in browser_cookies:
+            session.cookies.set(cookie["name"], cookie["value"])
+
+        session.headers.update({
+            "User-Agent": driver.execute_script("return navigator.userAgent"),
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+        })
+
+        if "OnlineJudge" not in session.cookies:
+            print("❌ Login failed — please check your BOJ_ID and BOJ_PASSWORD secrets")
+            return None
+
+        print("✅ Login successful")
+        return session
+
+    except Exception as e:
+        print(f"❌ Login error: {e}")
         return None
 
-    soup = BeautifulSoup(resp.text, "html.parser")
-    csrf = soup.select_one("input[name=csrf_key]")
-
-    if not csrf:
-        print("  ⚠️  Could not find CSRF token — dumping page snippet for debug:")
-        print(resp.text[:500])
-        return None
-
-    csrf_value = csrf["value"]
-    print(f"  Found CSRF token: {csrf_value[:10]}...")
-
-    # Small delay to mimic human behavior
-    time.sleep(1)
-
-    # Step 2: Submit login form
-    login_data = {
-        "login_user_id": BOJ_ID,
-        "login_password": BOJ_PASSWORD,
-        "csrf_key": csrf_value,
-        "auto_login": "on"
-    }
-
-    login_headers = {
-        **HEADERS,
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": "https://www.acmicpc.net/login",
-        "Origin": "https://www.acmicpc.net",
-    }
-
-    resp = session.post(
-        "https://www.acmicpc.net/signin",
-        data=login_data,
-        headers=login_headers,
-        allow_redirects=True
-    )
-
-    print(f"  Login POST status: {resp.status_code}, final URL: {resp.url}")
-
-    # Step 3: Verify login succeeded
-    if "OnlineJudge" not in session.cookies:
-        print("❌ Login failed — OnlineJudge cookie not found after POST")
-        # Check if we're still on the login page (wrong credentials)
-        if "login" in resp.url:
-            print("  Still on login page — check your BOJ_ID and BOJ_PASSWORD secrets")
-        return None
-
-    print("✅ Login successful")
-    return session
+    finally:
+        driver.quit()
 
 # ─────────────────────────────────────────
 #  STEP 2: Fetch all solved problems from solved.ac
@@ -159,7 +139,7 @@ def get_all_solved():
 def get_accepted_submission(problem_id, session):
     # result_id=4 means "Accepted"
     url  = f"https://www.acmicpc.net/status?user_id={BOJ_ID}&problem_id={problem_id}&result_id=4"
-    resp = session.get(url, headers=HEADERS)
+    resp = session.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     print(f"    Submission page status: {resp.status_code}")
@@ -167,7 +147,6 @@ def get_accepted_submission(problem_id, session):
     row = soup.select_one("table#status-table tbody tr")
     if not row:
         print(f"  ⚠️  No accepted submission found for problem {problem_id}")
-        print(f"    (Make sure your Baekjoon profile is set to public)")
         return None, None, None
 
     submission_id = row.select_one("td:first-child").text.strip()
@@ -177,7 +156,7 @@ def get_accepted_submission(problem_id, session):
     print(f"    Found submission {submission_id} in {lang}")
 
     source_url = f"https://www.acmicpc.net/source/{submission_id}"
-    resp       = session.get(source_url, headers=HEADERS)
+    resp       = session.get(source_url)
     soup       = BeautifulSoup(resp.text, "html.parser")
 
     code_tag = soup.select_one("#source-code")
@@ -191,7 +170,6 @@ def get_accepted_submission(problem_id, session):
 #  STEP 4: Save file and git commit
 # ─────────────────────────────────────────
 def sanitize(name):
-    """Remove characters that are invalid in filenames."""
     invalid = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
     for ch in invalid:
         name = name.replace(ch, "")
@@ -204,7 +182,6 @@ def commit_solution(problem_id, problem_name, code, lang, is_update=False):
 
     os.makedirs(folder, exist_ok=True)
 
-    # Filename: "1000 (A+B).cpp"
     safe_name = sanitize(problem_name)
     filename  = f"{problem_id} ({safe_name}).{ext}"
     filepath  = os.path.join(folder, filename)
