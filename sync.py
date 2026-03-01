@@ -30,8 +30,22 @@ LANG_FOLDERS = {
     "py":  "baekjoon/python",
 }
 
+# Realistic browser headers to avoid 403
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+}
+
 # ─────────────────────────────────────────
-#  STEP 1: Log in with requests to get session cookie
+#  STEP 1: Log in with requests to get session
 # ─────────────────────────────────────────
 def get_session():
     if not BOJ_ID or not BOJ_PASSWORD:
@@ -39,26 +53,30 @@ def get_session():
         return None
 
     session = requests.Session()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://www.acmicpc.net/login"
-    }
 
     print("🔐 Logging in to Baekjoon...")
 
-    # Step 1: Load the login page to get the csrf token
-    resp = session.get("https://www.acmicpc.net/login", headers=headers)
-    soup = BeautifulSoup(resp.text, "html.parser")
+    # Step 1: Load the login page to get CSRF token
+    resp = session.get("https://www.acmicpc.net/login", headers=HEADERS)
+    print(f"  Login page status: {resp.status_code}")
 
-    # Extract csrf token from the login form
+    if resp.status_code != 200:
+        print(f"❌ Could not load login page (status {resp.status_code})")
+        return None
+
+    soup = BeautifulSoup(resp.text, "html.parser")
     csrf = soup.select_one("input[name=csrf_key]")
+
     if not csrf:
-        print("  ⚠️  Could not find CSRF token on login page")
-        print(f"  Page status: {resp.status_code}")
+        print("  ⚠️  Could not find CSRF token — dumping page snippet for debug:")
+        print(resp.text[:500])
         return None
 
     csrf_value = csrf["value"]
     print(f"  Found CSRF token: {csrf_value[:10]}...")
+
+    # Small delay to mimic human behavior
+    time.sleep(1)
 
     # Step 2: Submit login form
     login_data = {
@@ -68,18 +86,28 @@ def get_session():
         "auto_login": "on"
     }
 
+    login_headers = {
+        **HEADERS,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": "https://www.acmicpc.net/login",
+        "Origin": "https://www.acmicpc.net",
+    }
+
     resp = session.post(
         "https://www.acmicpc.net/signin",
         data=login_data,
-        headers=headers,
+        headers=login_headers,
         allow_redirects=True
     )
 
-    # Step 3: Verify login succeeded by checking for the OnlineJudge cookie
+    print(f"  Login POST status: {resp.status_code}, final URL: {resp.url}")
+
+    # Step 3: Verify login succeeded
     if "OnlineJudge" not in session.cookies:
-        print("❌ Login failed — OnlineJudge cookie not found")
-        print(f"  Response URL: {resp.url}")
-        print(f"  Response status: {resp.status_code}")
+        print("❌ Login failed — OnlineJudge cookie not found after POST")
+        # Check if we're still on the login page (wrong credentials)
+        if "login" in resp.url:
+            print("  Still on login page — check your BOJ_ID and BOJ_PASSWORD secrets")
         return None
 
     print("✅ Login successful")
@@ -112,7 +140,6 @@ def get_all_solved():
 
         for item in items:
             problem_id   = item["problemId"]
-            # Use Korean title, fall back to English, fall back to problem number
             problem_name = item.get("titleKo") or item.get("titleEn", f"Problem {problem_id}")
             solved.append((problem_id, problem_name))
 
@@ -130,13 +157,9 @@ def get_all_solved():
 #  Returns (submission_id, code, lang)
 # ─────────────────────────────────────────
 def get_accepted_submission(problem_id, session):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    }
-
     # result_id=4 means "Accepted"
     url  = f"https://www.acmicpc.net/status?user_id={BOJ_ID}&problem_id={problem_id}&result_id=4"
-    resp = session.get(url, headers=headers)
+    resp = session.get(url, headers=HEADERS)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     print(f"    Submission page status: {resp.status_code}")
@@ -154,7 +177,7 @@ def get_accepted_submission(problem_id, session):
     print(f"    Found submission {submission_id} in {lang}")
 
     source_url = f"https://www.acmicpc.net/source/{submission_id}"
-    resp       = session.get(source_url, headers=headers)
+    resp       = session.get(source_url, headers=HEADERS)
     soup       = BeautifulSoup(resp.text, "html.parser")
 
     code_tag = soup.select_one("#source-code")
