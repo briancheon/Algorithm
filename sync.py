@@ -48,14 +48,10 @@ def get_session_cookie():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-
-    # Point Selenium to the correct Chromium binary
     options.binary_location = "/usr/bin/chromium-browser"
 
-    # Point Selenium to the correct chromedriver
     service = Service("/usr/bin/chromedriver")
-
-    driver = webdriver.Chrome(service=service, options=options)
+    driver  = webdriver.Chrome(service=service, options=options)
 
     try:
         print("🔐 Logging in to Baekjoon...")
@@ -68,7 +64,6 @@ def get_session_cookie():
         driver.find_element(By.ID, "login_password").send_keys(BOJ_PASSWORD)
         driver.find_element(By.ID, "submit_button").click()
 
-        # Wait until redirected away from login page
         wait.until(EC.url_changes("https://www.acmicpc.net/login"))
 
         cookie = driver.get_cookie("OnlineJudge")
@@ -88,11 +83,12 @@ def get_session_cookie():
 
 # ─────────────────────────────────────────
 #  STEP 2: Fetch all solved problems from solved.ac
+#  Returns list of (problem_id, problem_name)
 # ─────────────────────────────────────────
 def get_all_solved():
     print(f"📋 Fetching solved problems for {BOJ_ID}...")
     solved = []
-    page = 1
+    page   = 1
 
     while True:
         url = (
@@ -105,12 +101,15 @@ def get_all_solved():
             print(f"  ⚠️  solved.ac API error: {resp.status_code}")
             break
 
-        data = resp.json()
+        data  = resp.json()
         items = data.get("items", [])
         if not items:
             break
 
-        solved.extend([item["problemId"] for item in items])
+        for item in items:
+            problem_id   = item["problemId"]
+            problem_name = item.get("titleKo") or item.get("titleEn", f"Problem {item['problemId']}")
+            solved.append((problem_id, problem_name))
 
         if len(solved) >= data["count"]:
             break
@@ -133,22 +132,27 @@ def get_accepted_submission(problem_id, session_cookie):
     }
 
     # result_id=4 means "Accepted"
-    url = f"https://www.acmicpc.net/status?user_id={BOJ_ID}&problem_id={problem_id}&result_id=4"
+    url  = f"https://www.acmicpc.net/status?user_id={BOJ_ID}&problem_id={problem_id}&result_id=4"
     resp = session.get(url, headers=headers)
     soup = BeautifulSoup(resp.text, "html.parser")
+
+    print(f"    Submission page status: {resp.status_code}")
 
     row = soup.select_one("table#status-table tbody tr")
     if not row:
         print(f"  ⚠️  No accepted submission found for problem {problem_id}")
+        print(f"    (Make sure your Baekjoon profile is set to public)")
         return None, None, None
 
     submission_id = row.select_one("td:first-child").text.strip()
     lang_cell     = row.select_one(".language")
     lang          = lang_cell.text.strip() if lang_cell else "unknown"
 
+    print(f"    Found submission {submission_id} in {lang}")
+
     source_url = f"https://www.acmicpc.net/source/{submission_id}"
-    resp = session.get(source_url, headers=headers)
-    soup = BeautifulSoup(resp.text, "html.parser")
+    resp       = session.get(source_url, headers=headers)
+    soup       = BeautifulSoup(resp.text, "html.parser")
 
     code_tag = soup.select_one("#source-code")
     if not code_tag:
@@ -160,26 +164,40 @@ def get_accepted_submission(problem_id, session_cookie):
 # ─────────────────────────────────────────
 #  STEP 4: Save file and git commit
 # ─────────────────────────────────────────
-def commit_solution(problem_id, code, lang, is_update=False):
+def sanitize(name):
+    """Remove characters that are invalid in filenames."""
+    invalid = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+    for ch in invalid:
+        name = name.replace(ch, "")
+    return name.strip()
+
+def commit_solution(problem_id, problem_name, code, lang, is_update=False):
     ext         = LANG_EXTENSIONS.get(lang, "txt")
     folder_name = LANG_FOLDERS.get(ext, f"baekjoon/{ext}")
     folder      = os.path.join(REPO_PATH, "Algorithm", folder_name)
 
     os.makedirs(folder, exist_ok=True)
 
-    filepath = os.path.join(folder, f"{problem_id}.{ext}")
+    # Filename: "1000 (A+B).cpp"
+    safe_name = sanitize(problem_name)
+    filename  = f"{problem_id} ({safe_name}).{ext}"
+    filepath  = os.path.join(folder, filename)
+
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(code)
 
     commit_message = f"Sol {problem_id} Updated" if is_update else f"Sol {problem_id}"
 
-    subprocess.run(["git", "add", filepath])
-    subprocess.run(["git", "commit", "-m", commit_message])
+    result = subprocess.run(["git", "add", filepath], capture_output=True, text=True)
+    print(f"    git add: {result.returncode} {result.stderr.strip()}")
+
+    result = subprocess.run(["git", "commit", "-m", commit_message], capture_output=True, text=True)
+    print(f"    git commit: {result.returncode} {result.stdout.strip()} {result.stderr.strip()}")
+
     print(f"  ✅ {'Updated' if is_update else 'Committed'}: {commit_message}  ({lang}  →  {filepath})")
 
 # ─────────────────────────────────────────
 #  STATE — track problem → latest submission ID
-#  e.g. {"1000": "12345678", "1001": "87654321"}
 # ─────────────────────────────────────────
 def load_state():
     if os.path.exists("state.json"):
@@ -202,31 +220,30 @@ def run():
 
     # 2. Load state and find all solved problems
     state      = load_state()
-    all_solved = get_all_solved()
+    all_solved = get_all_solved()  # list of (problem_id, problem_name)
 
-    # 3. Determine which problems are new or have a newer submission
-    new_problems      = [p for p in all_solved if str(p) not in state]
-    existing_problems = [p for p in all_solved if str(p) in state]
+    new_problems      = [(pid, pname) for pid, pname in all_solved if str(pid) not in state]
+    existing_problems = [(pid, pname) for pid, pname in all_solved if str(pid) in state]
 
     print(f"🆕 {len(new_problems)} new problem(s) to commit")
     print(f"🔍 Checking {len(existing_problems)} existing problem(s) for newer submissions\n")
 
-    # 4. Commit new problems
-    for problem_id in new_problems:
-        print(f"  Processing new problem {problem_id}...")
+    # 3. Commit new problems
+    for problem_id, problem_name in new_problems:
+        print(f"  Processing new problem {problem_id} ({problem_name})...")
         submission_id, code, lang = get_accepted_submission(problem_id, session_cookie)
 
         if not code:
             continue
 
-        commit_solution(problem_id, code, lang, is_update=False)
+        commit_solution(problem_id, problem_name, code, lang, is_update=False)
         state[str(problem_id)] = submission_id
         save_state(state)
         time.sleep(2)
 
-    # 5. Check existing problems for newer submissions
-    for problem_id in existing_problems:
-        print(f"  Checking problem {problem_id} for updates...")
+    # 4. Check existing problems for newer submissions
+    for problem_id, problem_name in existing_problems:
+        print(f"  Checking problem {problem_id} ({problem_name}) for updates...")
         submission_id, code, lang = get_accepted_submission(problem_id, session_cookie)
 
         if not code:
@@ -234,14 +251,15 @@ def run():
 
         if submission_id != state[str(problem_id)]:
             print(f"  🔄 Newer submission found for problem {problem_id}!")
-            commit_solution(problem_id, code, lang, is_update=True)
+            commit_solution(problem_id, problem_name, code, lang, is_update=True)
             state[str(problem_id)] = submission_id
             save_state(state)
 
         time.sleep(2)
 
-    # 6. Push all commits at once
-    subprocess.run(["git", "push"])
+    # 5. Push all commits at once
+    result = subprocess.run(["git", "push"], capture_output=True, text=True)
+    print(f"  git push: {result.returncode} {result.stdout.strip()} {result.stderr.strip()}")
     print("\n🚀 All done! Solutions pushed to GitHub.")
 
 if __name__ == "__main__":
