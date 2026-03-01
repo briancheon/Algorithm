@@ -1,0 +1,6 @@
+.DS_Store
+**/test*.*
+**/test*
+.vscode
+/baekjoon/c/execution
+**/.test*

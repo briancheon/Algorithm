@@ -1,0 +1,153 @@
+import sys
+import random
+
+def miller_rabin(n, s=5):
+    if n == 2:
+        return True
+    if n % 2 == 0:
+        return False
+
+    for _ in range(s):
+        a = random.randint(1, n - 1)
+        if test(a, n):
+            return False
+
+    return True
+
+def test(a, n):
+    t = 0
+    u = n - 1
+    while u % 2 == 0:
+        t += 1
+        u //= 2
+
+    preX = pow(a, u, n)
+    curX = 0
+    for _ in range(t):
+        curX = (preX * preX) % n
+        if curX == 1 and preX != 1 and preX != n - 1:
+            return True
+        preX = curX
+        
+    if curX != 1:
+        return True
+
+    return False
+
+def gcd(a, b):
+    if a < b:
+        a, b = b, a
+    while b:
+        a, b = b, a % b
+    return a
+
+def rho(n):
+    if n == 1:
+        return 1
+    if miller_rabin(n):
+        return n
+    if n % 2 == 0:
+        return 2
+    for p in [3, 5, 7, 11, 13, 17, 19, 23, 29, 31]:
+        if n % p == 0:
+            return p
+    x = random.randrange(2, n)
+    c = random.randrange(1, n)
+    y = x
+    d = 1
+    while d == 1:
+        x = (x * x % n + c) % n
+        y = (y * y % n + c) % n
+        y = (y * y % n + c) % n
+        d = gcd(n, abs(x - y))
+        if d == n:
+            return rho(n)
+    if miller_rabin(d):
+        return d
+    else:
+        return rho(d)
+
+A, B, C, D = map(int, sys.stdin.readline().split())
+
+if A == 0:
+    if B != 0 and C != 0 and -D % gcd(B, C) == 0:
+        print("INFINITY")
+
+    elif (B == 0 and C != 0 and -D % C == 0) or (B != 0 and C == 0 and -D % B == 0):
+        print("INFINITY")
+
+    elif D == 0:
+        print("INFINITY")
+        
+    else:
+        print(0)
+
+elif B == 0 and C == 0:
+    if D == 0:
+        print("INFINITY")
+    
+    elif D % A == 0:
+        N = n = -D // A
+        n = abs(n)
+        factors = {}
+        while n % 2 == 0:
+            n //= 2
+            factors[2] = factors.get(2, 0) + 1
+
+        while n > 1:
+            divisor = rho(n)
+            factors[divisor] = factors.get(divisor, 0) + 1
+            n //= divisor
+        
+        divisors = [1]
+        
+        for base, exp in factors.items():
+            divisors.extend([div * (base ** i) for div in divisors for i in range(1, exp + 1)])
+        
+        answer = []
+        for i in divisors:
+            answer.append((-i, -N // i))
+            answer.append((i, N // i))
+
+        print(len(answer))
+
+        for i in sorted(answer):
+            print(*i)
+
+    else:
+        print(0)
+
+elif B * C == A * D:
+    if C % A == 0 or B % A == 0:
+        print("INFINITY")
+    
+    else:
+        print(0)
+
+else:
+    N = n = B * C - A * D
+    n = abs(n)
+    factors = {}
+    while n % 2 == 0:
+        n //= 2
+        factors[2] = factors.get(2, 0) + 1
+
+    while n > 1:
+        divisor = rho(n)
+        factors[divisor] = factors.get(divisor, 0) + 1
+        n //= divisor
+
+    divisors = [1]
+    for base, exp in factors.items():
+        temp = [div * (base ** i) for div in divisors for i in range(1, exp + 1)]
+        divisors.extend(temp)
+
+    answer = []
+    for i in divisors:
+        for x, y in [(i, N // i), (-i, N // (-i))]:
+            if (x - C) % A == 0 and (y - B) % A == 0:
+                answer.append(((x - C) // A, (y - B) // A))
+    
+    print(len(answer))
+    for i in sorted(answer):
+        print(*i)
