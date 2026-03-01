@@ -3,12 +3,12 @@ import subprocess
 import os
 import json
 import time
-import hashlib
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
 
 # ─────────────────────────────────────────
 #  CONFIG — all read from GitHub Secrets
@@ -49,7 +49,13 @@ def get_session_cookie():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
 
-    driver = webdriver.Chrome(options=options)
+    # Point Selenium to the correct Chromium binary
+    options.binary_location = "/usr/bin/chromium-browser"
+
+    # Point Selenium to the correct chromedriver
+    service = Service("/usr/bin/chromedriver")
+
+    driver = webdriver.Chrome(service=service, options=options)
 
     try:
         print("🔐 Logging in to Baekjoon...")
@@ -116,7 +122,8 @@ def get_all_solved():
     return solved
 
 # ─────────────────────────────────────────
-#  STEP 3: Fetch most recent accepted submission from Baekjoon
+#  STEP 3: Fetch latest accepted submission from Baekjoon
+#  Returns (submission_id, code, lang)
 # ─────────────────────────────────────────
 def get_accepted_submission(problem_id, session_cookie):
     session = requests.Session()
@@ -125,7 +132,7 @@ def get_accepted_submission(problem_id, session_cookie):
         "Cookie": f"OnlineJudge={session_cookie}"
     }
 
-    # result_id=4 means "Accepted" — table sorted by date desc so first row = most recent
+    # result_id=4 means "Accepted"
     url = f"https://www.acmicpc.net/status?user_id={BOJ_ID}&problem_id={problem_id}&result_id=4"
     resp = session.get(url, headers=headers)
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -148,14 +155,14 @@ def get_accepted_submission(problem_id, session_cookie):
         print(f"  ⚠️  Could not retrieve source for submission {submission_id}")
         return None, None, None
 
-    return code_tag.text, lang, submission_id
+    return submission_id, code_tag.text, lang
 
 # ─────────────────────────────────────────
 #  STEP 4: Save file and git commit
 # ─────────────────────────────────────────
 def commit_solution(problem_id, code, lang, is_update=False):
     ext         = LANG_EXTENSIONS.get(lang, "txt")
-    folder_name = LANG_FOLDERS.get(ext, f"baekjoon/{ext}")  # fallback for new languages
+    folder_name = LANG_FOLDERS.get(ext, f"baekjoon/{ext}")
     folder      = os.path.join(REPO_PATH, "Algorithm", folder_name)
 
     os.makedirs(folder, exist_ok=True)
@@ -164,39 +171,21 @@ def commit_solution(problem_id, code, lang, is_update=False):
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(code)
 
-    commit_msg = f"Update Sol {problem_id}" if is_update else f"Sol {problem_id}"
+    commit_message = f"Sol {problem_id} Updated" if is_update else f"Sol {problem_id}"
 
     subprocess.run(["git", "add", filepath])
-    subprocess.run(["git", "commit", "-m", commit_msg])
-    print(f"  ✅ Committed: {commit_msg}  ({lang}  →  {filepath})")
+    subprocess.run(["git", "commit", "-m", commit_message])
+    print(f"  ✅ {'Updated' if is_update else 'Committed'}: {commit_message}  ({lang}  →  {filepath})")
 
 # ─────────────────────────────────────────
-#  HELPER: Hash code content to detect changes
-# ─────────────────────────────────────────
-def hash_code(code):
-    return hashlib.md5(code.encode("utf-8")).hexdigest()
-
-# ─────────────────────────────────────────
-#  STATE — tracks each problem's submission_id and code hash
-#
-#  state.json format:
-#  {
-#    "problems": {
-#      "1000": { "submission_id": "12345678", "hash": "abc123..." },
-#      "1001": { "submission_id": "87654321", "hash": "def456..." }
-#    }
-#  }
+#  STATE — track problem → latest submission ID
+#  e.g. {"1000": "12345678", "1001": "87654321"}
 # ─────────────────────────────────────────
 def load_state():
     if os.path.exists("state.json"):
         with open("state.json") as f:
-            data = json.load(f)
-            # Migrate old format {"committed": [...]} to new format
-            if "committed" in data:
-                print("  🔄 Migrating state.json to new format...")
-                return {"problems": {str(p): {} for p in data["committed"]}}
-            return data
-    return {"problems": {}}
+            return json.load(f)
+    return {}
 
 def save_state(state):
     with open("state.json", "w") as f:
@@ -211,51 +200,49 @@ def run():
     if not session_cookie:
         return
 
-    # 2. Load state and fetch all solved problems
-    state    = load_state()
-    problems = state["problems"]
-
+    # 2. Load state and find all solved problems
+    state      = load_state()
     all_solved = get_all_solved()
 
-    new_count    = 0
-    update_count = 0
-    skip_count   = 0
+    # 3. Determine which problems are new or have a newer submission
+    new_problems      = [p for p in all_solved if str(p) not in state]
+    existing_problems = [p for p in all_solved if str(p) in state]
 
-    # 3. Process every solved problem
-    for problem_id in all_solved:
-        pid = str(problem_id)
-        print(f"  Processing problem {problem_id}...")
+    print(f"🆕 {len(new_problems)} new problem(s) to commit")
+    print(f"🔍 Checking {len(existing_problems)} existing problem(s) for newer submissions\n")
 
-        code, lang, submission_id = get_accepted_submission(problem_id, session_cookie)
+    # 4. Commit new problems
+    for problem_id in new_problems:
+        print(f"  Processing new problem {problem_id}...")
+        submission_id, code, lang = get_accepted_submission(problem_id, session_cookie)
+
         if not code:
             continue
 
-        current_hash = hash_code(code)
-
-        if pid not in problems:
-            # ── Brand new problem ──────────────────────────
-            commit_solution(problem_id, code, lang, is_update=False)
-            problems[pid] = {"submission_id": submission_id, "hash": current_hash}
-            new_count += 1
-
-        elif problems[pid].get("hash") != current_hash:
-            # ── Already committed but code has changed ─────
-            commit_solution(problem_id, code, lang, is_update=True)
-            problems[pid] = {"submission_id": submission_id, "hash": current_hash}
-            update_count += 1
-
-        else:
-            # ── Identical to what's already in the repo ────
-            skip_count += 1
-
+        commit_solution(problem_id, code, lang, is_update=False)
+        state[str(problem_id)] = submission_id
         save_state(state)
-        time.sleep(2)  # be polite to Baekjoon's servers
+        time.sleep(2)
 
-    print(f"\n📊 Summary: {new_count} new | {update_count} updated | {skip_count} unchanged")
+    # 5. Check existing problems for newer submissions
+    for problem_id in existing_problems:
+        print(f"  Checking problem {problem_id} for updates...")
+        submission_id, code, lang = get_accepted_submission(problem_id, session_cookie)
 
-    # 4. Push all commits at once
+        if not code:
+            continue
+
+        if submission_id != state[str(problem_id)]:
+            print(f"  🔄 Newer submission found for problem {problem_id}!")
+            commit_solution(problem_id, code, lang, is_update=True)
+            state[str(problem_id)] = submission_id
+            save_state(state)
+
+        time.sleep(2)
+
+    # 6. Push all commits at once
     subprocess.run(["git", "push"])
-    print("🚀 All done! Solutions pushed to GitHub.")
+    print("\n🚀 All done! Solutions pushed to GitHub.")
 
 if __name__ == "__main__":
     run()
