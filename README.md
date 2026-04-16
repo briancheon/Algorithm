@@ -6,7 +6,7 @@ This repository contains solutions to algorithm problems from various online jud
 
 ## 🙋‍♂️ Handles
 
-[![solved.ac stats v2 streak](https://solvedac-readme-stats.vercel.app/api?handle={username}&v=2&streak=true)](https://solved.ac/profile/ngblock)  
+[![solved.ac stats v2 streak](https://solvedac-readme-stats.vercel.app/api?handle=ngblock&v=2&streak=true)](https://solved.ac/profile/ngblock)  
 **Baekjoon**: [ngblock](https://icpc.me/ngblock) (Diamond 5)  
 **Codeforces**: [brian1000](https://codeforces.com/profile/brian1000) (Newbie)  
 
